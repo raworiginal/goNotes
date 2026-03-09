@@ -7,12 +7,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/raworiginal/goNotes/internal/config"
+	"github.com/raworiginal/goNotes/internal/db"
 )
 
 func main() {
 	cfg := config.Load()
-	r := chi.NewRouter()
 
+	database, err := db.Open(cfg.DBPath)
+	if err != nil {
+		panic(err)
+	}
+	defer database.Close()
+
+	r := chi.NewRouter()
 	r.Get("/health", getHealth)
 
 	fmt.Printf("Server running on  http://localhost:%s \n", cfg.Port)
