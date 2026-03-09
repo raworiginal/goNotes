@@ -6,15 +6,17 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/raworiginal/goNotes/internal/config"
 )
 
 func main() {
+	cfg := config.Load()
 	r := chi.NewRouter()
 
 	r.Get("/health", getHealth)
 
-	fmt.Println("Server running on  http://localhost:8080")
-	if err := http.ListenAndServe(":8080", r); err != nil {
+	fmt.Printf("Server running on  http://localhost:%s \n", cfg.Port)
+	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
 		panic(err)
 	}
 }
