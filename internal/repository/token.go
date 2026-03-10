@@ -17,7 +17,7 @@ func CreateToken(db *sql.DB, userID int, token string, expiresAt time.Time) erro
 
 func FindUserIDByToken(db *sql.DB, token string) (int, error) {
 	var userID int
-	query := "SELECT user_id FROM refresh_tokens WHERE token = ?"
+	query := "SELECT user_id FROM refresh_tokens WHERE token = ? AND expires_at > CURRENT_TIMESTAMP"
 	err := db.QueryRow(query, token).Scan(&userID)
 	if err != nil {
 		switch err {
