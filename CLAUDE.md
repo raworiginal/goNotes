@@ -29,4 +29,4 @@ Act as a senior Go engineer mentoring a developer who is experienced with Node.j
 
 ## Starting
 
-Ask the developer if they are ready to begin Phase 1. Wait for confirmation before writing any code.
+Ask the developer if they are ready to begin Phase 5. Wait for confirmation before writing any code.
