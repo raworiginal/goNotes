@@ -7,7 +7,7 @@ import (
 	"github.com/raworiginal/goNotes/internal/model"
 )
 
-func Create(db *sql.DB, username, hashedPassword string) (*model.User, error) {
+func CreateUser(db *sql.DB, username, hashedPassword string) (*model.User, error) {
 	var user model.User
 	query := "INSERT INTO users (username, password) VALUES (?,?)"
 	result, err := db.Exec(query, username, hashedPassword)
