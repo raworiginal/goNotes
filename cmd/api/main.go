@@ -6,8 +6,11 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	mw "github.com/go-chi/chi/v5/middleware"
 	"github.com/raworiginal/goNotes/internal/config"
 	"github.com/raworiginal/goNotes/internal/db"
+	"github.com/raworiginal/goNotes/internal/handler"
+	am "github.com/raworiginal/goNotes/internal/middleware"
 )
 
 func main() {
@@ -19,8 +22,29 @@ func main() {
 	}
 	defer database.Close()
 
+	authHandler := handler.NewAuthHandler(database, cfg)
+	noteHandler := handler.NewNotesHandler(database, cfg)
+	authMiddleware := am.NewAuthMiddleware(cfg)
+
 	r := chi.NewRouter()
+	r.Use(mw.Logger)
 	r.Get("/health", getHealth)
+
+	r.Route("/auth", func(r chi.Router) {
+		r.Post("/register", authHandler.Register)
+		r.Post("/login", authHandler.Login)
+		r.Post("/logout", authHandler.Logout)
+	})
+
+	r.Route("/notes", func(r chi.Router) {
+		r.Use(authMiddleware.Handler)
+		r.Get("/", noteHandler.List)
+		r.Post("/", noteHandler.Create)
+		r.Get("/{id}", noteHandler.GetNoteByID)
+		r.Put("/{id}", noteHandler.UpdateNote)
+		r.Patch("/{id}", noteHandler.PatchNote)
+		r.Delete("/{id}", noteHandler.DeleteNote)
+	})
 
 	fmt.Printf("Server running on  http://localhost:%s \n", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
