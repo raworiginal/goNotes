@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -10,8 +11,8 @@ type Config struct {
 	Port            string
 	DBPath          string
 	JWTSecret       string
-	AccessTokenTTL  string
-	RefreshTokenTTL string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
 }
 
 func Load() *Config {
@@ -20,8 +21,8 @@ func Load() *Config {
 		Port:            getEnv("PORT", "8080"),
 		DBPath:          getEnv("DB_PATH", ""),
 		JWTSecret:       getEnv("JWT_SECRET", ""),
-		AccessTokenTTL:  getEnv("ACCESS_TOKEN_TTL", "15m"),
-		RefreshTokenTTL: getEnv("REFRESH_TOKEN_TTL", "168h"),
+		AccessTokenTTL:  parseDuration(getEnv("ACCESS_TOKEN_TTL", "15m")),
+		RefreshTokenTTL: parseDuration(getEnv("REFRESH_TOKEN_TTL", "168h")),
 	}
 }
 
@@ -33,4 +34,12 @@ func getEnv(key string, defaultVal string) string {
 		panic("Missing required env var: " + key)
 	}
 	return defaultVal
+}
+
+func parseDuration(s string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		panic("invalid duration: " + s)
+	}
+	return d
 }
