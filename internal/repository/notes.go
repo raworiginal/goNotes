@@ -7,10 +7,9 @@ import (
 	"github.com/raworiginal/goNotes/internal/model"
 )
 
-func CreateNote(db *sql.DB, userID int, title, noteType, body, items string) (*model.Note, error) {
-	var note model.Note
+func CreateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 	query := "INSERT INTO notes (user_id, title, type, body, items) VALUES (?,?,?,?,?)"
-	result, err := db.Exec(query, userID, title, noteType, body, items)
+	result, err := db.Exec(query, note.UserID, note.Title, note.Type, note.Body, note.Items)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +28,7 @@ func CreateNote(db *sql.DB, userID int, title, noteType, body, items string) (*m
 		}
 	}
 
-	return &note, nil
+	return note, nil
 }
 
 func FindNoteByID(db *sql.DB, userID, noteID int) (*model.Note, error) {
@@ -75,13 +74,26 @@ func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
 	return notes, nil
 }
 
-func UpdateNote(db *sql.DB, userID, noteID int, title, noteType, body, items string) error {
+func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 	query := "UPDATE notes SET title = ?, type = ?, body = ?, items = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND id = ?"
-	_, err := db.Exec(query, title, noteType, body, items, userID, noteID)
+	_, err := db.Exec(query, note.Title, note.Type, note.Body, note.Items, note.UserID, note.ID)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("update note: %w", err)
 	}
-	return nil
+
+	// Fetch the updated note to return with new timestamps
+	query = "SELECT id, user_id, title, type, body, items, created_at, updated_at FROM notes WHERE user_id = ? AND id = ?"
+	err = db.QueryRow(query, note.UserID, note.ID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.Items, &note.CreatedAt, &note.UpdatedAt)
+	if err != nil {
+		switch err {
+		case sql.ErrNoRows:
+			return nil, sql.ErrNoRows
+		default:
+			return nil, fmt.Errorf("fetch updated note: %w", err)
+		}
+	}
+
+	return note, nil
 }
 
 func DeleteNote(db *sql.DB, userID, noteID int) error {
