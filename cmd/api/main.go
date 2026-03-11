@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	mw "github.com/go-chi/chi/v5/middleware"
 	"github.com/raworiginal/goNotes/internal/config"
 	"github.com/raworiginal/goNotes/internal/db"
@@ -27,6 +28,16 @@ func main() {
 	authMiddleware := am.NewAuthMiddleware(cfg)
 
 	r := chi.NewRouter()
+
+	// CORS middleware - loaded from config
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   cfg.CORSOrigins,
+		AllowedMethods:   cfg.CORSMethods,
+		AllowedHeaders:   cfg.CORSHeaders,
+		AllowCredentials: cfg.CORSCredentials,
+		MaxAge:           cfg.CORSMaxAge,
+	}))
+
 	r.Use(mw.Logger)
 	r.Get("/health", getHealth)
 
