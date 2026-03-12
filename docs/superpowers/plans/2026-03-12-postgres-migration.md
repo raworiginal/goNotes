@@ -151,33 +151,21 @@ Read the file to understand current structure. Identify where `DB_PATH` is loade
 
 - [ ] **Step 2: Replace DB_PATH with DATABASE_URL**
 
-Change:
+In the Config struct, change:
 ```go
 // OLD
-type Config struct {
-    Port             string
-    DBPath           string
-    JWTSecret        string
-    AccessTokenTTL   time.Duration
-    RefreshTokenTTL  time.Duration
-}
+DBPath string
 
-// In Load():
-cfg.DBPath = os.Getenv("DB_PATH")
+// NEW
+DatabaseURL string
 ```
 
-To:
+In the Load() function, change:
 ```go
-// NEW
-type Config struct {
-    Port             string
-    DatabaseURL      string
-    JWTSecret        string
-    AccessTokenTTL   time.Duration
-    RefreshTokenTTL  time.Duration
-}
+// OLD
+cfg.DBPath = os.Getenv("DB_PATH")
 
-// In Load():
+// NEW
 cfg.DatabaseURL = os.Getenv("DATABASE_URL")
 ```
 
@@ -205,46 +193,83 @@ git commit -m "config: read DATABASE_URL instead of DB_PATH"
 
 Read the file to understand how it currently opens SQLite and runs migrations.
 
-- [ ] **Step 2: Replace SQLite import with PostgreSQL**
+- [ ] **Step 2: Replace SQLite import with PostgreSQL and update Open() function**
 
-Change:
+Change the import from:
 ```go
 // OLD
-import _ "github.com/mattn/go-sqlite3"
-
-func Open(cfg *config.Config) (*sql.DB, error) {
-    db, err := sql.Open("sqlite3", cfg.DBPath)
-    ...
-}
+_ "github.com/mattn/go-sqlite3"
 ```
 
 To:
 ```go
 // NEW
-import _ "github.com/lib/pq"
+_ "github.com/lib/pq"
+```
 
-func Open(cfg *config.Config) (*sql.DB, error) {
-    db, err := sql.Open("postgres", cfg.DatabaseURL)
+Change the `Open()` function signature and implementation from:
+```go
+// OLD
+func Open(dbPath string) (*sql.DB, error) {
+    db, err := sql.Open("sqlite3", dbPath)
     if err != nil {
         return nil, fmt.Errorf("open database: %w", err)
     }
     if err := db.Ping(); err != nil {
         return nil, fmt.Errorf("ping database: %w", err)
     }
+    // Read and execute the migration
+    migrationSQL, err := os.ReadFile("internal/db/migrations/001_init.sql")
+    // ... execute migration
+}
+```
+
+To:
+```go
+// NEW
+func Open(databaseURL string) (*sql.DB, error) {
+    db, err := sql.Open("postgres", databaseURL)
+    if err != nil {
+        return nil, fmt.Errorf("open database: %w", err)
+    }
+    if err := db.Ping(); err != nil {
+        return nil, fmt.Errorf("ping database: %w", err)
+    }
+    // Read and execute the migration
+    migrationSQL, err := os.ReadFile("internal/db/migrations/001_init.sql")
+    if err != nil {
+        return nil, fmt.Errorf("read migration: %w", err)
+    }
+    if _, err := db.Exec(string(migrationSQL)); err != nil {
+        return nil, fmt.Errorf("execute migration: %w", err)
+    }
     return db, nil
 }
 ```
 
-- [ ] **Step 3: Verify compilation**
+The migration execution logic stays the same, but now it will run the PostgreSQL schema instead of SQLite.
+
+- [ ] **Step 3: Update cmd/api/main.go to pass DATABASE_URL**
+
+Find where `db.Open()` is called (likely in main.go). Change:
+```go
+// OLD
+database, err := db.Open(cfg.DBPath)
+
+// NEW
+database, err := db.Open(cfg.DatabaseURL)
+```
+
+- [ ] **Step 4: Verify compilation**
 
 Run: `go build ./cmd/api`
 
-Expected: No compilation errors (may warn about unused SQLite import if it exists elsewhere)
+Expected: No compilation errors
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add internal/db/db.go
+git add internal/db/db.go cmd/api/main.go
 git commit -m "db: switch to postgresql driver (lib/pq)"
 ```
 
@@ -392,22 +417,23 @@ git commit -m "model: remove Items from Note, add ID to ChecklistItem"
 **Files:**
 - Modify: `internal/repository/notes.go`
 
-This is the most complex task. The repository must:
-1. Update `Create()` to insert items in a transaction
-2. Add new `FindChecklistItems()` method
-3. Update `FindByID()` to return Note without items
-4. Update `Update()` to use transactions
+The repository uses package-level functions (not struct methods). Update these functions to:
+1. Remove the `items` field from all queries
+2. Add new `FindChecklistItems()` function
+3. Update `CreateNote()` to insert items in a transaction
+4. Update `UpdateNote()` to use transactions
 
 - [ ] **Step 1: Review current notes.go**
 
-Understand the current repository struct, the connection to the database, and existing method signatures.
+Understand the current function signatures and how they query the `items` field.
 
-- [ ] **Step 2: Add FindChecklistItems() method**
+- [ ] **Step 2: Add FindChecklistItems() function**
+
+Add this new function:
 
 ```go
-// Load checklist items for a note, ordered by position
-func (r *NotesRepository) FindChecklistItems(ctx context.Context, noteID int) ([]ChecklistItem, error) {
-    rows, err := r.db.QueryContext(ctx,
+func FindChecklistItems(db *sql.DB, noteID int) ([]model.ChecklistItem, error) {
+    rows, err := db.Query(
         "SELECT id, text, completed FROM checklist_items WHERE note_id = $1 ORDER BY position",
         noteID,
     )
@@ -416,9 +442,9 @@ func (r *NotesRepository) FindChecklistItems(ctx context.Context, noteID int) ([
     }
     defer rows.Close()
 
-    var items []ChecklistItem
+    var items []model.ChecklistItem
     for rows.Next() {
-        var item ChecklistItem
+        var item model.ChecklistItem
         if err := rows.Scan(&item.ID, &item.Text, &item.Completed); err != nil {
             return nil, fmt.Errorf("scan item: %w", err)
         }
@@ -431,135 +457,172 @@ func (r *NotesRepository) FindChecklistItems(ctx context.Context, noteID int) ([
 }
 ```
 
-- [ ] **Step 3: Update Create() method**
+- [ ] **Step 3: Update CreateNote() function**
 
-Change signature to accept items:
+Change the function to accept items and use a transaction:
 
 ```go
-// OLD
-func (r *NotesRepository) Create(ctx context.Context, note *Note) error {
-    // JSON marshal items, insert as one row
-}
+// OLD signature:
+// func CreateNote(db *sql.DB, note *model.Note) (*model.Note, error)
 
-// NEW
-func (r *NotesRepository) Create(ctx context.Context, note *Note, items []ChecklistItem) error {
-    tx, err := r.db.BeginTx(ctx, nil)
+// NEW signature and implementation:
+func CreateNote(db *sql.DB, note *model.Note, items []model.ChecklistItem) (*model.Note, error) {
+    tx, err := db.Begin()
     if err != nil {
-        return fmt.Errorf("begin tx: %w", err)
+        return nil, fmt.Errorf("begin tx: %w", err)
     }
     defer tx.Rollback()
 
-    // Insert note
-    err = tx.QueryRowContext(ctx,
-        "INSERT INTO notes (user_id, title, type, body, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-        note.UserID, note.Title, note.Type, note.Body, time.Now(), time.Now(),
-    ).Scan(&note.ID)
+    // Insert note (no items column)
+    query := "INSERT INTO notes (user_id, title, type, body, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at, updated_at"
+    err = tx.QueryRow(query, note.UserID, note.Title, note.Type, note.Body, time.Now(), time.Now()).Scan(&note.ID, &note.CreatedAt, &note.UpdatedAt)
     if err != nil {
-        return fmt.Errorf("insert note: %w", err)
+        return nil, fmt.Errorf("insert note: %w", err)
     }
 
-    // Insert items (only if type is "checklist")
+    // Insert items if type is "checklist"
     if note.Type == "checklist" {
         for i, item := range items {
-            _, err := tx.ExecContext(ctx,
+            _, err := tx.Exec(
                 "INSERT INTO checklist_items (note_id, text, completed, position) VALUES ($1, $2, $3, $4)",
                 note.ID, item.Text, item.Completed, i+1, // position starts at 1
             )
             if err != nil {
-                return fmt.Errorf("insert item: %w", err)
+                return nil, fmt.Errorf("insert item: %w", err)
             }
         }
     }
 
-    return tx.Commit().Err
-}
-```
-
-- [ ] **Step 4: Update FindByID() method**
-
-Ensure it only returns the Note (without items):
-
-```go
-// OLD - returned JSON items
-// NEW - just return the Note struct
-
-func (r *NotesRepository) FindByID(ctx context.Context, id int) (*Note, error) {
-    note := &Note{}
-    err := r.db.QueryRowContext(ctx,
-        "SELECT id, user_id, title, type, body, created_at, updated_at FROM notes WHERE id = $1",
-        id,
-    ).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
-    if err == sql.ErrNoRows {
-        return nil, nil
-    }
-    if err != nil {
-        return nil, fmt.Errorf("query note: %w", err)
+    if err := tx.Commit(); err != nil {
+        return nil, fmt.Errorf("commit tx: %w", err)
     }
     return note, nil
 }
 ```
 
-- [ ] **Step 5: Update Update() method**
+- [ ] **Step 4: Update FindNoteByID() function**
 
-Change signature to accept items and use transactions:
+Remove the `items` column from the SELECT:
 
 ```go
-// OLD
-func (r *NotesRepository) Update(ctx context.Context, note *Note) error {
-    // JSON marshal items, update as one row
-}
+// OLD:
+// query := "SELECT id, user_id, title, type, body, items, created_at, updated_at FROM notes Where id = ? AND user_id = ?"
 
-// NEW
-func (r *NotesRepository) Update(ctx context.Context, note *Note, items []ChecklistItem) error {
-    tx, err := r.db.BeginTx(ctx, nil)
+// NEW:
+func FindNoteByID(db *sql.DB, userID, noteID int) (*model.Note, error) {
+    var note model.Note
+    query := "SELECT id, user_id, title, type, body, created_at, updated_at FROM notes WHERE id = $1 AND user_id = $2"
+    err := db.QueryRow(query, noteID, userID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
+    if err == sql.ErrNoRows {
+        return nil, sql.ErrNoRows
+    }
     if err != nil {
-        return fmt.Errorf("begin tx: %w", err)
+        return nil, err
+    }
+    return &note, nil
+}
+```
+
+- [ ] **Step 5: Update FindAllNotesByUser() function**
+
+Remove the `items` column from the SELECT:
+
+```go
+// OLD:
+// query := "SELECT id, user_id, title, type, body, items, created_at, updated_at FROM notes Where user_id = ? ORDER BY created_at DESC"
+
+// NEW:
+func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
+    var notes []*model.Note
+    query := "SELECT id, user_id, title, type, body, created_at, updated_at FROM notes WHERE user_id = $1 ORDER BY created_at DESC"
+    rows, err := db.Query(query, userID)
+    if err != nil {
+        return nil, fmt.Errorf("query notes: %w", err)
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var note model.Note
+        err := rows.Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
+        if err != nil {
+            return nil, fmt.Errorf("scan note: %w", err)
+        }
+        notes = append(notes, &note)
+    }
+    if err := rows.Err(); err != nil {
+        return nil, fmt.Errorf("rows error: %w", err)
+    }
+    return notes, nil
+}
+```
+
+- [ ] **Step 6: Update UpdateNote() function**
+
+Change to accept items and use a transaction:
+
+```go
+// OLD:
+// func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error)
+
+// NEW:
+func UpdateNote(db *sql.DB, note *model.Note, items []model.ChecklistItem) (*model.Note, error) {
+    tx, err := db.Begin()
+    if err != nil {
+        return nil, fmt.Errorf("begin tx: %w", err)
     }
     defer tx.Rollback()
 
-    // Update note
-    _, err = tx.ExecContext(ctx,
-        "UPDATE notes SET title = $1, type = $2, body = $3, updated_at = $4 WHERE id = $5",
-        note.Title, note.Type, note.Body, time.Now(), note.ID,
-    )
+    // Update note (no items column)
+    query := "UPDATE notes SET title = $1, type = $2, body = $3, updated_at = $4 WHERE user_id = $5 AND id = $6"
+    _, err = tx.Exec(query, note.Title, note.Type, note.Body, time.Now(), note.UserID, note.ID)
     if err != nil {
-        return fmt.Errorf("update note: %w", err)
+        return nil, fmt.Errorf("update note: %w", err)
     }
 
     // Delete old items
-    _, err = tx.ExecContext(ctx, "DELETE FROM checklist_items WHERE note_id = $1", note.ID)
+    _, err = tx.Exec("DELETE FROM checklist_items WHERE note_id = $1", note.ID)
     if err != nil {
-        return fmt.Errorf("delete old items: %w", err)
+        return nil, fmt.Errorf("delete old items: %w", err)
     }
 
-    // Insert new items (only if type is "checklist")
+    // Insert new items if type is "checklist"
     if note.Type == "checklist" {
         for i, item := range items {
-            _, err := tx.ExecContext(ctx,
+            _, err := tx.Exec(
                 "INSERT INTO checklist_items (note_id, text, completed, position) VALUES ($1, $2, $3, $4)",
                 note.ID, item.Text, item.Completed, i+1,
             )
             if err != nil {
-                return fmt.Errorf("insert item: %w", err)
+                return nil, fmt.Errorf("insert item: %w", err)
             }
         }
     }
 
-    return tx.Commit().Err
+    // Re-fetch the note to get updated timestamps
+    query = "SELECT id, user_id, title, type, body, created_at, updated_at FROM notes WHERE user_id = $1 AND id = $2"
+    err = tx.QueryRow(query, note.UserID, note.ID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
+    if err != nil {
+        return nil, fmt.Errorf("fetch updated note: %w", err)
+    }
+
+    if err := tx.Commit(); err != nil {
+        return nil, fmt.Errorf("commit tx: %w", err)
+    }
+    return note, nil
 }
 ```
 
-- [ ] **Step 6: Verify compilation**
+- [ ] **Step 7: Verify compilation**
 
 Run: `go build ./internal/repository`
 
 Expected: No compilation errors
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add internal/repository/notes.go
-git commit -m "repository: add FindChecklistItems, use transactions for item operations"
+git commit -m "repository: remove items field, add FindChecklistItems, use transactions"
 ```
 
 ---
