@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/cors"
 	mw "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/raworiginal/goNotes/internal/config"
 	"github.com/raworiginal/goNotes/internal/db"
 	"github.com/raworiginal/goNotes/internal/handler"
