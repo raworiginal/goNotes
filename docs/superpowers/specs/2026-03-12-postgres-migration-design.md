@@ -99,7 +99,7 @@ CREATE TABLE refresh_tokens (
 
 ## Docker Compose Setup
 
-**File:** `docker-compose.yml`
+**File location:** Create `docker-compose.yml` at the **project root** (same level as `go.mod`, `cmd/`, `internal/`, `docs/`)
 
 ```yaml
 version: '3.8'
@@ -121,10 +121,20 @@ volumes:
   postgres_data:
 ```
 
+**Commit to git:** Yes, this should be committed to git so all developers use the same database setup.
+
 **Usage:**
 - `docker-compose up -d` to start PostgreSQL
 - `docker-compose down` to stop
 - Default connection string: `postgres://postgres:postgres@localhost:5432/gonotes`
+
+**.env file:**
+Update `.env.example` and `.env` to include:
+```
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/gonotes
+```
+
+You can remove `DB_PATH` since SQLite is no longer used. The config should require `DATABASE_URL` to be set.
 
 ---
 
@@ -168,9 +178,30 @@ The migration remains idempotent with `CREATE TABLE IF NOT EXISTS`.
 ### 4. Models (`internal/model/`)
 
 **`note.go` changes:**
-- Remove `Items *string` field (was holding JSON)
-- Keep `Items []ChecklistItem` in memory only (not a DB field, loaded separately)
-- Add a struct field to distinguish from the DB struct if needed
+- Remove the `Items` field entirely from the Note struct (was holding JSON)
+- Update `ChecklistItem` struct to include an `ID` field: `ID int`
+- This means the Note struct returned by the repository will NOT include items; they must be loaded separately
+
+Example updated structs:
+```go
+type Note struct {
+    ID        int
+    UserID    int
+    Title     string
+    Type      string
+    Body      string
+    CreatedAt time.Time
+    UpdatedAt time.Time
+    // NO Items field
+}
+
+type ChecklistItem struct {
+    ID        int    // NEW: add this
+    Text      string
+    Completed bool
+    // NO Position field in the struct (internal to DB only)
+}
+```
 
 **No changes needed:**
 - `user.go`
@@ -180,16 +211,43 @@ The migration remains idempotent with `CREATE TABLE IF NOT EXISTS`.
 
 **Current approach:**
 - `Create()`: Marshals checklist items to JSON, stores in `items` field
-- `FindByID()`: Unmarshals JSON into items
+- `FindByID()`: Unmarshals JSON into items, returns complete Note
 - `Update()`: Re-marshals JSON
 
 **Target approach:**
-- `Create()`: Inserts note, then loops through items to insert each one with position
-- `FindByID()`: Queries note, then queries `checklist_items` ORDER BY position
-- `Update()`: Updates note fields, then handles items (delete old, insert new)
+- `Create(note *Note, items []ChecklistItem)`: Inserts note in a transaction, then loops through items to insert each one with position
+- `FindByID(id int)`: Returns Note WITHOUT items (items must be loaded separately)
+- `FindChecklistItems(noteID int)`: NEW function to load items for a note, ordered by position
+- `Update(note *Note, items []ChecklistItem)`: Updates note fields in transaction, deletes old items, inserts new items
 - `Delete()`: Cascades automatically via FK constraint
 
-**New queries to write:**
+**Key design decision:** The repository will have separate methods for loading notes and loading items. Handlers are responsible for calling both when needed.
+
+**New method signatures:**
+```go
+// In repository/notes.go
+func (r *NotesRepository) Create(ctx context.Context, note *Note, items []ChecklistItem) error {
+    // BEGIN TRANSACTION
+    // Insert note
+    // Loop through items, INSERT each with position (1, 2, 3...)
+    // COMMIT TRANSACTION
+}
+
+func (r *NotesRepository) FindChecklistItems(ctx context.Context, noteID int) ([]ChecklistItem, error) {
+    // SELECT id, text, completed FROM checklist_items
+    // WHERE note_id = $1 ORDER BY position
+}
+
+func (r *NotesRepository) Update(ctx context.Context, note *Note, items []ChecklistItem) error {
+    // BEGIN TRANSACTION
+    // UPDATE note SET ...
+    // DELETE FROM checklist_items WHERE note_id = $1
+    // Loop through items, INSERT each with position (1, 2, 3...)
+    // COMMIT TRANSACTION
+}
+```
+
+**SQL queries to write:**
 ```sql
 -- Insert a checklist item
 INSERT INTO checklist_items (note_id, text, completed, position)
@@ -204,42 +262,113 @@ ORDER BY position
 DELETE FROM checklist_items WHERE note_id = $1
 ```
 
+**Position assignment:** When inserting items in `Create()` or `Update()`, assign position as `1, 2, 3...` based on the order they appear in the `items []ChecklistItem` slice passed from the handler.
+
 ### 6. Handlers (`internal/handler/notes.go`)
 
-**No logic changes needed.** Handlers still work with `Note` structs that have `Items []ChecklistItem`. The repository handles converting between the request/response format and the relational schema.
+**Changes required:**
+
+For **read operations** (`GET /notes/{id}`):
+- Call `repo.FindByID(id)` to get the Note
+- Call `repo.FindChecklistItems(noteID)` to load items
+- Combine them in a response struct that includes both Note and Items
+- This ensures the API response still shows `"items": [...]` for checklist notes
+
+For **create operations** (`POST /notes`):
+- Parse request body as before
+- Extract items array from request
+- Call `repo.Create(note, items)` instead of `repo.Create(note)`
+
+For **update operations** (`PUT/PATCH /notes/{id}`):
+- Parse request body as before
+- Extract items array from request
+- Call `repo.Update(note, items)` instead of `repo.Update(note)`
+
+**Response helper:** Create a response struct that combines Note + Items for API responses, since the Note struct no longer contains Items:
+```go
+type NoteResponse struct {
+    ID        int              `json:"id"`
+    UserID    int              `json:"user_id"`
+    Title     string           `json:"title"`
+    Type      string           `json:"type"`
+    Body      string           `json:"body"`
+    Items     []ChecklistItem  `json:"items,omitempty"`  // Only for checklist type
+    CreatedAt time.Time        `json:"created_at"`
+    UpdatedAt time.Time        `json:"updated_at"`
+}
+```
+
+This keeps the API contract unchanged while separating the database schema concerns.
 
 ---
 
 ## API Compatibility
 
-Request/response shapes remain unchanged:
+**Request and response shapes remain unchanged for clients:**
 
 ```json
 {
+  "id": 1,
   "title": "Shopping",
   "type": "checklist",
   "items": [
     { "text": "Milk", "completed": false },
     { "text": "Eggs", "completed": true }
-  ]
+  ],
+  "created_at": "2026-03-12T10:00:00Z",
+  "updated_at": "2026-03-12T10:00:00Z"
 }
 ```
 
-The refactoring is purely internal to the database layer. Handlers and API contracts stay the same.
+**Internal changes:**
+- Handlers will use a `NoteResponse` struct to combine the Note and ChecklistItems before sending to the client
+- This keeps the API contract unchanged while separating database concerns
+- The items no longer have an `id` field in the API response (clients don't need to reference individual items yet)
+
+---
+
+## Transaction Handling
+
+When creating or updating a note with items, both operations must succeed together or both must fail. Use database transactions:
+
+```go
+func (r *NotesRepository) Create(ctx context.Context, note *Note, items []ChecklistItem) error {
+    tx, err := r.db.BeginTx(ctx, nil)
+    if err != nil {
+        return fmt.Errorf("begin transaction: %w", err)
+    }
+    defer tx.Rollback()  // Rolled back if anything fails
+
+    // INSERT note using tx
+    // INSERT each item using tx
+    // If any INSERT fails, all changes are rolled back
+
+    return tx.Commit().Error  // Only commits if all succeeds
+}
+```
+
+Same pattern for `Update()`. This prevents partial writes if an item insert fails partway through.
 
 ---
 
 ## Testing Strategy
 
 1. **Spin up PostgreSQL:** `docker-compose up -d`
-2. **Update `.env`:** Point `DATABASE_URL` to the running container
+2. **Update `.env`:** Set `DATABASE_URL=postgres://postgres:postgres@localhost:5432/gonotes`
 3. **Start the API:** `go run ./cmd/api`
 4. **Test manually with curl:**
    - Register a user
-   - Create a checklist note with multiple items
-   - Verify items come back in order
-   - Update the note (modify/add/remove items)
-   - Delete the note (verify cascade)
+   - Create a checklist note with multiple items, verify items come back in order
+   - Create a text note, verify `items` array is empty or omitted
+   - Update a checklist note (modify/add/remove items), verify items change
+   - Delete the note and verify it's gone (cascade deletes items automatically)
+   - Try creating a note with invalid `type` (should fail validation in handler)
+5. **Verify cascading delete** by checking items are gone when note is deleted:
+   ```bash
+   # After deleting a note, query the database directly:
+   docker-compose exec postgres psql -U postgres -d gonotes -c "SELECT * FROM checklist_items WHERE note_id = <deleted_id>;"
+   # Should return 0 rows
+   ```
 
 ---
 
