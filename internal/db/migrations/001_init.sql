@@ -1,25 +1,32 @@
 CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT NOT NULL UNIQUE,
-  password TEXT NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(255) NOT NULL UNIQUE,
+  password VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS notes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, 
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, 
-  title TEXT NOT NULL,
-  type TEXT NOT NULL CHECK(type in ('text', 'checklist')),
-  body TEXT NOT NULL DEFAULT '', -- plain text when type='text',
-  items TEXT,                    -- JSON arraay when type='checklist'
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      VARCHAR(255) NOT NULL,
+  type       VARCHAR(20) NOT NULL CHECK(type IN ('text', 'checklist')),
+  body       TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS checklist_items (
+  id         SERIAL PRIMARY KEY,
+  note_id    INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  text       TEXT NOT NULL,
+  completed  BOOLEAN NOT NULL DEFAULT false,
+  position   INTEGER NOT NULL  -- Tracks insertion order
 );
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token TEXT NOT NULL UNIQUE,
-  expires_at DATETIME NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token      VARCHAR(255) NOT NULL UNIQUE,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

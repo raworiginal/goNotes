@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func Open(dbPath string) (*sql.DB, error) {
+func Open(databaseURL string) (*sql.DB, error) {
 	// Open returns a connection pool, not a single connection
-	db, err := sql.Open("sqlite3", dbPath)
+	connStr := databaseURL + "?sslmode=disable"
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}

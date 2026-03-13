@@ -54,13 +54,13 @@ func (h *NotesHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NotesHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req NewNoteRequest
+	var req *model.Note
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid json request"}`, http.StatusBadRequest)
 		return
 	}
 	if req.Title == "" || req.Type != "text" && req.Type != "checklist" {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"title and type required"}`, http.StatusBadRequest)
 		return
 	}
 	userID, err := am.UserIDFromContext(r)
@@ -68,28 +68,9 @@ func (h *NotesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	// Marshal items if checklist
-	var itemsJSON string
-	if req.Type == "checklist" {
-		itemsBytes, err := json.Marshal(req.Items)
-		if err != nil {
-			http.Error(w, `{"error":"invalid items"}`, http.StatusBadRequest)
-			return
-		}
-		itemsJSON = string(itemsBytes)
-	}
-	// if req.Type == "text", itemsJSON stays empty
+	req.UserID = userID
 
-	note := &model.Note{
-		UserID: userID,
-		Title:  req.Title,
-		Type:   req.Type,
-		Body:   req.Body,
-		Items:  itemsJSON,
-	}
-
-	// Create the note
-	created, err := repo.CreateNote(h.db, note)
+	created, err := repo.CreateNote(h.db, req)
 	if err != nil {
 		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		return
@@ -114,15 +95,18 @@ func (h *NotesHandler) GetNoteByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := repo.FindNoteByID(h.db, userID, noteID)
+	note, err := repo.FindNoteByID(h.db, noteID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
 			return
 		} else {
 			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 			return
 		}
+	}
+	if note.UserID != userID {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -141,16 +125,22 @@ func (h *NotesHandler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	note, err := repo.FindNoteByID(h.db, userID, noteID)
+	note, err := repo.FindNoteByID(h.db, noteID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
 			return
 		} else {
-			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+			http.Error(w, `{"error":" 134 internal server error"}`, http.StatusInternalServerError)
+			return
 		}
 	}
-	var req NewNoteRequest
+	if note.UserID != userID {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var req *model.Note
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
@@ -159,30 +149,11 @@ func (h *NotesHandler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
-	// Marshal items if checklist
-	var itemsJSON string
-	if req.Type == "checklist" {
-		itemsBytes, err := json.Marshal(req.Items)
-		if err != nil {
-			http.Error(w, `{"error":"invalid items"}`, http.StatusBadRequest)
-			return
-		}
-		itemsJSON = string(itemsBytes)
-	}
-	// if req.Type == "text", itemsJSON stays empty
+	req.ID = noteID
 
-	note = &model.Note{
-		ID:     noteID,
-		UserID: userID,
-		Title:  req.Title,
-		Type:   req.Type,
-		Body:   req.Body,
-		Items:  itemsJSON,
-	}
-
-	updatedNote, err := repo.UpdateNote(h.db, note)
+	updatedNote, err := repo.UpdateNote(h.db, req)
 	if err != nil {
-		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":" db internal server error"}`, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -202,20 +173,25 @@ func (h *NotesHandler) PatchNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	note, err := repo.FindNoteByID(h.db, userID, noteID)
+	note, err := repo.FindNoteByID(h.db, noteID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
 			return
 		} else {
 			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		}
+	}
+	if note.UserID != userID {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
 	}
 	var req PatchNoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
+
 	if req.Title != nil {
 		note.Title = *req.Title
 	}
@@ -226,13 +202,9 @@ func (h *NotesHandler) PatchNote(w http.ResponseWriter, r *http.Request) {
 		note.Body = *req.Body
 	}
 	if req.Items != nil {
-		itemsBytes, err := json.Marshal(req.Items)
-		if err != nil {
-			http.Error(w, `{"error":"invalid items"}`, http.StatusBadRequest)
-			return
-		}
-		note.Items = string(itemsBytes)
+		note.Items = *req.Items
 	}
+
 	updatedNote, err := repo.UpdateNote(h.db, note)
 	if err != nil {
 		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
@@ -255,7 +227,7 @@ func (h *NotesHandler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	_, err = repo.FindNoteByID(h.db, userID, noteID)
+	note, err := repo.FindNoteByID(h.db, noteID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -264,7 +236,11 @@ func (h *NotesHandler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		}
 	}
-	if err := repo.DeleteNote(h.db, userID, noteID); err != nil {
+	if note.UserID != userID {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if err := repo.DeleteNote(h.db, noteID); err != nil {
 		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		return
 	}

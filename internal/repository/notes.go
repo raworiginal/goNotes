@@ -8,17 +8,53 @@ import (
 )
 
 func CreateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
-	query := "INSERT INTO notes (user_id, title, type, body, items) VALUES (?,?,?,?,?)"
-	result, err := db.Exec(query, note.UserID, note.Title, note.Type, note.Body, note.Items)
+	tx, err := db.Begin()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create note: %w", err)
 	}
-	noteID, err := result.LastInsertId()
+	defer tx.Rollback()
+
+	query := `
+	INSERT INTO notes (user_id, title, type, body)
+	VALUES ($1, $2, $3, $4)
+	RETURNING id, created_at, updated_at
+	`
+
+	err = tx.QueryRow(query, note.UserID, note.Title, note.Type, note.Body).Scan(&note.ID, &note.CreatedAt, &note.UpdatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("LastInsertId: %w", err)
+		return nil, fmt.Errorf("create note: %w", err)
 	}
-	query = "SELECT id, user_id, title, type, body, items, created_at, updated_at FROM notes Where id = ?"
-	err = db.QueryRow(query, noteID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.Items, &note.CreatedAt, &note.UpdatedAt)
+	if note.Type == "checklist" {
+		for i, item := range note.Items {
+			query := `
+			INSERT INTO checklist_items (note_id, text, completed, position)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+			`
+
+			err = tx.QueryRow(query, note.ID, item.Text, item.Completed, i+1).Scan(&item.ID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	err = tx.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("create note: %w", err)
+	}
+
+	return note, nil
+}
+
+func FindNoteByID(db *sql.DB, noteID int) (*model.Note, error) {
+	var note model.Note
+
+	query := `
+	SELECT id, user_id, title, type, body, created_at, updated_at 
+	FROM notes 
+	WHERE id = $1
+	`
+	err := db.QueryRow(query, noteID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
 	if err != nil {
 		switch err {
 		case sql.ErrNoRows:
@@ -28,18 +64,9 @@ func CreateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 		}
 	}
 
-	return note, nil
-}
-
-func FindNoteByID(db *sql.DB, userID, noteID int) (*model.Note, error) {
-	var note model.Note
-	query := "SELECT id, user_id, title, type, body, items, created_at, updated_at FROM notes Where id = ? AND user_id = ?"
-	err := db.QueryRow(query, noteID, userID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.Items, &note.CreatedAt, &note.UpdatedAt)
-	if err != nil {
-		switch err {
-		case sql.ErrNoRows:
-			return nil, sql.ErrNoRows
-		default:
+	if note.Type == "checklist" {
+		note.Items, err = getCheckListItems(db, noteID)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -48,7 +75,9 @@ func FindNoteByID(db *sql.DB, userID, noteID int) (*model.Note, error) {
 
 func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
 	var notes []*model.Note
-	query := "SELECT id, user_id, title, type, body, items, created_at, updated_at FROM notes Where user_id = ? ORDER BY created_at DESC"
+	query := `
+	SELECT id, user_id, title, type, body, created_at, updated_at FROM notes Where user_id = $1 ORDER BY created_at DESC
+	`
 	rows, err := db.Query(query, userID)
 	if err != nil {
 		switch err {
@@ -62,10 +91,17 @@ func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
 
 	for rows.Next() {
 		var note model.Note
-		err := rows.Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.Items, &note.CreatedAt, &note.UpdatedAt)
+		err := rows.Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan note: %w", err)
 		}
+		if note.Type == "checklist" {
+			note.Items, err = getCheckListItems(db, note.ID)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		notes = append(notes, &note)
 	}
 	if err := rows.Err(); err != nil {
@@ -75,32 +111,98 @@ func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
 }
 
 func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
-	query := "UPDATE notes SET title = ?, type = ?, body = ?, items = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND id = ?"
-	_, err := db.Exec(query, note.Title, note.Type, note.Body, note.Items, note.UserID, note.ID)
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	query := `
+	UPDATE notes 
+	SET title = $1, type = $2, body = $3, updated_at = CURRENT_TIMESTAMP 
+	WHERE id = $4
+	`
+	result, err := tx.Exec(query, note.Title, note.Type, note.Body, note.ID)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
-
-	// Fetch the updated note to return with new timestamps
-	query = "SELECT id, user_id, title, type, body, items, created_at, updated_at FROM notes WHERE user_id = ? AND id = ?"
-	err = db.QueryRow(query, note.UserID, note.ID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.Items, &note.CreatedAt, &note.UpdatedAt)
+	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		switch err {
-		case sql.ErrNoRows:
-			return nil, sql.ErrNoRows
-		default:
-			return nil, fmt.Errorf("fetch updated note: %w", err)
+		return nil, fmt.Errorf("update note: %w", err)
+	}
+	if rowsAffected == 0 {
+		return nil, sql.ErrNoRows
+	}
+
+	_, err = tx.Exec(`DELETE FROM checklist_items WHERE note_id = $1`, note.ID)
+	if err != nil {
+		return nil, fmt.Errorf("delete checklist items: %w", err)
+	}
+	if note.Type == "checklist" {
+		for i, item := range note.Items {
+			query := `
+			INSERT INTO checklist_items (note_id, text, completed, position)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
+			`
+			err = tx.QueryRow(query, note.ID, item.Text, item.Completed, i+1).Scan(&item.ID)
+			if err != nil {
+				return nil, fmt.Errorf("insert checklist item: %w", err)
+			}
 		}
+	}
+	err = tx.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("update note: %w", err)
+	}
+	note, err = FindNoteByID(db, note.ID)
+	if err != nil {
+		return nil, fmt.Errorf("update note: %w", err)
 	}
 
 	return note, nil
 }
 
-func DeleteNote(db *sql.DB, userID, noteID int) error {
-	query := "DELETE FROM notes WHERE user_id = ? AND id = ?"
-	_, err := db.Exec(query, userID, noteID)
+func DeleteNote(db *sql.DB, noteID int) error {
+	query := `
+DELETE FROM notes WHERE id = $1
+	`
+	result, err := db.Exec(query, noteID)
 	if err != nil {
-		return err
+		return fmt.Errorf("delete note: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete note: %w", err)
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func getCheckListItems(db *sql.DB, noteID int) ([]model.ChecklistItem, error) {
+	var items []model.ChecklistItem
+	checklistQuery := `
+		SELECT id, position, text, completed
+		FROM checklist_items
+		WHERE note_id = $1
+		ORDER BY position
+		`
+	rows, err := db.Query(checklistQuery, noteID)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var item model.ChecklistItem
+		err := rows.Scan(&item.ID, &item.Position, &item.Text, &item.Completed)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, err
 }
