@@ -58,7 +58,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Validate input
 	if req.Username == "" || req.Password == "" {
-		http.Error(w, `{"error": "username and password required"`, http.StatusBadRequest)
+		http.Error(w, `{"error": "username and password required"}`, http.StatusBadRequest)
 		return
 	}
 
