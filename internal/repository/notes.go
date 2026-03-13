@@ -134,23 +134,20 @@ func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 		return nil, sql.ErrNoRows
 	}
 
+	_, err = tx.Exec(`DELETE FROM checklist_items WHERE note_id = $1`, note.ID)
+	if err != nil {
+		return nil, fmt.Errorf("delete checklist items: %w", err)
+	}
 	if note.Type == "checklist" {
 		for i, item := range note.Items {
 			query := `
-			UPDATE checklist_items
-			SET position = $1, text = $2, completed = $3
-			WHERE id = $4
+			INSERT INTO checklist_items (note_id, text, completed, position)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id
 			`
-			result, err := tx.Exec(query, i+1, item.Text, item.Completed, item.ID)
+			err = tx.QueryRow(query, note.ID, item.Text, item.Completed, i+1).Scan(&item.ID)
 			if err != nil {
-				return nil, fmt.Errorf("update checklist item: %w", err)
-			}
-			rowsAffected, err := result.RowsAffected()
-			if err != nil {
-				return nil, fmt.Errorf("update checklist item: %w", err)
-			}
-			if rowsAffected == 0 {
-				return nil, sql.ErrNoRows
+				return nil, fmt.Errorf("insert checklist item: %w", err)
 			}
 		}
 	}

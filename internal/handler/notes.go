@@ -56,11 +56,11 @@ func (h *NotesHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *NotesHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req *model.Note
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"invalid json request"}`, http.StatusBadRequest)
 		return
 	}
 	if req.Title == "" || req.Type != "text" && req.Type != "checklist" {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"title and type required"}`, http.StatusBadRequest)
 		return
 	}
 	userID, err := am.UserIDFromContext(r)
@@ -131,7 +131,7 @@ func (h *NotesHandler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
 			return
 		} else {
-			http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+			http.Error(w, `{"error":" 134 internal server error"}`, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -149,10 +149,11 @@ func (h *NotesHandler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
+	req.ID = noteID
 
 	updatedNote, err := repo.UpdateNote(h.db, req)
 	if err != nil {
-		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":" db internal server error"}`, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
