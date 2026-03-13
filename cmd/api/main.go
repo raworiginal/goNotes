@@ -45,6 +45,7 @@ func main() {
 		r.Post("/register", authHandler.Register)
 		r.Post("/login", authHandler.Login)
 		r.Post("/logout", authHandler.Logout)
+		r.Post("/refresh", authHandler.RefreshToken)
 	})
 
 	r.Route("/notes", func(r chi.Router) {
