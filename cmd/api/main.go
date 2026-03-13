@@ -17,7 +17,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	database, err := db.Open(cfg.DBPath)
+	database, err := db.Open(cfg.DatabaseURL)
 	if err != nil {
 		panic(err)
 	}

@@ -1,0 +1,13 @@
+services:
+  db:
+    container_name: "notesDB"
+    image: postgres:18.3-alpine
+    volumes:
+      - "./database/postgres-data:/var/lib/postgresql/data:rw"
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: $POSTGRES_DB
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+    restart: unless-stopped

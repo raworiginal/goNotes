@@ -10,7 +10,7 @@ import (
 
 type Config struct {
 	Port            string
-	DBPath          string
+	DatabaseURL     string
 	JWTSecret       string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
@@ -25,7 +25,7 @@ func Load() *Config {
 	_ = godotenv.Load(".env")
 	return &Config{
 		Port:            getEnv("PORT", "8080"),
-		DBPath:          getEnv("DB_PATH", ""),
+		DatabaseURL:     getEnv("DATABASE_URL", ""),
 		JWTSecret:       getEnv("JWT_SECRET", ""),
 		AccessTokenTTL:  parseDuration(getEnv("ACCESS_TOKEN_TTL", "15m")),
 		RefreshTokenTTL: parseDuration(getEnv("REFRESH_TOKEN_TTL", "168h")),
