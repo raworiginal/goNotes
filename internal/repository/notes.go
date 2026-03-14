@@ -7,6 +7,7 @@ import (
 	"github.com/raworiginal/goNotes/internal/model"
 )
 
+
 func CreateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 	tx, err := db.Begin()
 	if err != nil {
@@ -56,12 +57,10 @@ func FindNoteByID(db *sql.DB, noteID int) (*model.Note, error) {
 	`
 	err := db.QueryRow(query, noteID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
 	if err != nil {
-		switch err {
-		case sql.ErrNoRows:
-			return nil, sql.ErrNoRows
-		default:
-			return nil, err
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
 		}
+		return nil, fmt.Errorf("find note by id: %w", err)
 	}
 
 	if note.Type == "checklist" {
@@ -80,12 +79,7 @@ func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
 	`
 	rows, err := db.Query(query, userID)
 	if err != nil {
-		switch err {
-		case sql.ErrNoRows:
-			return nil, sql.ErrNoRows
-		default:
-			return nil, err
-		}
+		return nil, fmt.Errorf("find all notes: %w", err)
 	}
 	defer rows.Close()
 
@@ -131,7 +125,7 @@ func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
 	if rowsAffected == 0 {
-		return nil, sql.ErrNoRows
+		return nil, ErrNotFound
 	}
 
 	_, err = tx.Exec(`DELETE FROM checklist_items WHERE note_id = $1`, note.ID)
@@ -176,7 +170,7 @@ DELETE FROM notes WHERE id = $1
 		return fmt.Errorf("delete note: %w", err)
 	}
 	if rowsAffected == 0 {
-		return sql.ErrNoRows
+		return ErrNotFound
 	}
 	return nil
 }

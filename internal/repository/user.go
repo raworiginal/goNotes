@@ -44,12 +44,10 @@ func FindByUsername(db *sql.DB, username string) (*model.User, error) {
 
 	err := db.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.Password, &user.CreatedAt)
 	if err != nil {
-		switch err {
-		case sql.ErrNoRows:
-			return nil, sql.ErrNoRows
-		default:
-			return nil, err
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
 		}
+		return nil, fmt.Errorf("find user: %w", err)
 	}
 	return &user, nil
 }

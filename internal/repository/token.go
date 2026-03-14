@@ -36,12 +36,10 @@ func FindUserIDByToken(db *sql.DB, token string) (int, error) {
 	`
 	err := db.QueryRow(query, token).Scan(&userID)
 	if err != nil {
-		switch err {
-		case sql.ErrNoRows:
-			return 0, sql.ErrNoRows
-		default:
-			return 0, fmt.Errorf("find token: %w", err)
+		if err == sql.ErrNoRows {
+			return 0, ErrNotFound
 		}
+		return 0, fmt.Errorf("find token: %w", err)
 	}
 	return userID, nil
 }
