@@ -3,10 +3,10 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"os"
 
 	_ "github.com/lib/pq"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/pressly/goose/v3"
+	"github.com/raworiginal/goNotes/internal/db/migrations"
 )
 
 func Open(databaseURL string) (*sql.DB, error) {
@@ -22,14 +22,15 @@ func Open(databaseURL string) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
-	// Read and execute the migration
-	migrationSQL, err := os.ReadFile("internal/db/migrations/001_init.sql")
-	if err != nil {
-		return nil, fmt.Errorf("read migration: %w", err)
+	goose.SetBaseFS(migrations.FS)
+
+	if err := goose.SetDialect("postgres"); err != nil {
+		return nil, fmt.Errorf("set dialect: %w", err)
 	}
 
-	if _, err := db.Exec(string(migrationSQL)); err != nil {
-		return nil, fmt.Errorf("execute migration: %w", err)
+	if err := goose.Up(db, "."); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
 	}
+
 	return db, nil
 }

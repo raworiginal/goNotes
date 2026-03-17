@@ -1,3 +1,4 @@
+-- +goose Up
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   username VARCHAR(255) NOT NULL UNIQUE,
@@ -30,3 +31,10 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   expires_at TIMESTAMP NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- +goose Down
+DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS checklist_items;
+DROP TABLE IF EXISTS notes;
+DROP TABLE IF EXISTS users;
