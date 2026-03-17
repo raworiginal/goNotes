@@ -51,3 +51,68 @@ func FindByUsername(db *sql.DB, username string) (*model.User, error) {
 	}
 	return &user, nil
 }
+
+func ListUsers(db *sql.DB) ([]*model.User, error) {
+	var users []*model.User
+	query := `
+	SELECT id, username, password, role, created_at, updated_at
+	FROM users
+	ORDER BY id ASC
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("list all users: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var user model.User
+		err = rows.Scan(&user.ID, &user.Username, &user.Password, &user.CreatedAt, &user.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, &user)
+	}
+
+	return users, nil
+}
+
+func UpdateUser(db *sql.DB, user *model.User) error {
+	query := `
+	UPDATE users
+	SET username = $1, password = $2, role = $3, updated_at = CURRENT_TIMESTAMP
+	WHERE id = $4
+	`
+	result, err := db.Exec(query, user.Username, user.Password, user.Role)
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func DeleteUser(db *sql.DB, userID int) error {
+	query := `
+	DELETE FROM users
+	WHERE id = $1
+	`
+	result, err := db.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
