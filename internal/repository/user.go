@@ -51,3 +51,42 @@ func FindByUsername(db *sql.DB, username string) (*model.User, error) {
 	}
 	return &user, nil
 }
+
+func UpdateUser(db *sql.DB, user *model.User) error {
+	query := `
+	UPDATE users
+	SET username = $1, password = $2, role = $3, updated_at = CURRENT_TIMESTAMP
+	WHERE id = $4
+	`
+	result, err := db.Exec(query, user.Username, user.Password, user.Role)
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func DeleteUser(db *sql.DB, userID int) error {
+	query := `
+	DELETE FROM users
+	WHERE id = $1
+	`
+	result, err := db.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
