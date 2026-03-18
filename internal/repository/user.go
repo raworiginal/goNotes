@@ -15,10 +15,10 @@ func NewUserRepository(db *sql.DB) *PGUserRepository {
 	return &PGUserRepository{db: db}
 }
 
-func (r *PGUserRepository) CreateUser(db *sql.DB, username, hashedPassword string) (*model.User, error) {
+func (r *PGUserRepository) CreateUser(username, hashedPassword string) (*model.User, error) {
 	var user model.User
 
-	tx, err := db.Begin()
+	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
@@ -41,7 +41,7 @@ func (r *PGUserRepository) CreateUser(db *sql.DB, username, hashedPassword strin
 	return &user, nil
 }
 
-func (r *PGUserRepository) FindUserByUsername(db *sql.DB, username string) (*model.User, error) {
+func (r *PGUserRepository) FindUserByUsername(username string) (*model.User, error) {
 	var user model.User
 
 	query := `
@@ -50,7 +50,7 @@ func (r *PGUserRepository) FindUserByUsername(db *sql.DB, username string) (*mod
 	WHERE username = $1
 	`
 
-	err := db.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.Password, &user.CreatedAt)
+	err := r.db.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.Password, &user.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
@@ -60,7 +60,7 @@ func (r *PGUserRepository) FindUserByUsername(db *sql.DB, username string) (*mod
 	return &user, nil
 }
 
-func (r *PGUserRepository) ListUsers(db *sql.DB) ([]*model.User, error) {
+func (r *PGUserRepository) ListUsers() ([]*model.User, error) {
 	var users []*model.User
 	query := `
 	SELECT id, username, password, role, created_at, updated_at
@@ -68,7 +68,7 @@ func (r *PGUserRepository) ListUsers(db *sql.DB) ([]*model.User, error) {
 	ORDER BY id ASC
 	`
 
-	rows, err := db.Query(query)
+	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("list all users: %w", err)
 	}
@@ -86,13 +86,13 @@ func (r *PGUserRepository) ListUsers(db *sql.DB) ([]*model.User, error) {
 	return users, nil
 }
 
-func (r *PGUserRepository) UpdateUser(db *sql.DB, user *model.User) error {
+func (r *PGUserRepository) UpdateUser(user *model.User) error {
 	query := `
 	UPDATE users
 	SET username = $1, password = $2, role = $3, updated_at = CURRENT_TIMESTAMP
 	WHERE id = $4
 	`
-	result, err := db.Exec(query, user.Username, user.Password, user.Role)
+	result, err := r.db.Exec(query, user.Username, user.Password, user.Role)
 	if err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
@@ -106,12 +106,12 @@ func (r *PGUserRepository) UpdateUser(db *sql.DB, user *model.User) error {
 	return nil
 }
 
-func (r *PGUserRepository) DeleteUser(db *sql.DB, userID int) error {
+func (r *PGUserRepository) DeleteUser(userID int) error {
 	query := `
 	DELETE FROM users
 	WHERE id = $1
 	`
-	result, err := db.Exec(query, userID)
+	result, err := r.db.Exec(query, userID)
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}

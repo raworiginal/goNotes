@@ -18,7 +18,7 @@ type UserRepository interface {
 	CreateUser(username, hashedPassword string) (*model.User, error)
 	FindUserByUsername(username string) (*model.User, error)
 	ListUsers() ([]*model.User, error)
-	UpdateUser(user *model.User) (*model.User, error)
+	UpdateUser(user *model.User) error
 	DeleteUser(userID int) error
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/raworiginal/goNotes/internal/db"
 	"github.com/raworiginal/goNotes/internal/handler"
 	am "github.com/raworiginal/goNotes/internal/middleware"
+	repo "github.com/raworiginal/goNotes/internal/repository"
 )
 
 func main() {
@@ -23,8 +24,10 @@ func main() {
 	}
 	defer database.Close()
 
-	authHandler := handler.NewAuthHandler(database, cfg)
-	noteHandler := handler.NewNotesHandler(database, cfg)
+	store := repo.NewStore(database)
+
+	authHandler := handler.NewAuthHandler(store, cfg)
+	noteHandler := handler.NewNotesHandler(store, cfg)
 	authMiddleware := am.NewAuthMiddleware(cfg)
 
 	r := chi.NewRouter()

@@ -6,8 +6,16 @@ import (
 	"time"
 )
 
-func CreateToken(db *sql.DB, userID int, token string, expiresAt time.Time) error {
-	tx, err := db.Begin()
+type PGTokenRepository struct {
+	db *sql.DB
+}
+
+func NewTokenRepository(db *sql.DB) *PGTokenRepository {
+	return &PGTokenRepository{db}
+}
+
+func (r *PGTokenRepository) CreateToken(userID int, token string, expiresAt time.Time) error {
+	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("create token: %w", err)
 	}
@@ -28,13 +36,13 @@ func CreateToken(db *sql.DB, userID int, token string, expiresAt time.Time) erro
 	return nil
 }
 
-func FindUserIDByToken(db *sql.DB, token string) (int, error) {
+func (r *PGTokenRepository) FindUserIDByToken(token string) (int, error) {
 	var userID int
 	query := `
 	SELECT user_id FROM refresh_tokens 
 	WHERE token = $1 AND expires_at > CURRENT_TIMESTAMP
 	`
-	err := db.QueryRow(query, token).Scan(&userID)
+	err := r.db.QueryRow(query, token).Scan(&userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return 0, ErrNotFound
@@ -44,23 +52,23 @@ func FindUserIDByToken(db *sql.DB, token string) (int, error) {
 	return userID, nil
 }
 
-func DeleteToken(db *sql.DB, token string) error {
+func (r *PGTokenRepository) DeleteToken(token string) error {
 	query := `
 	DELETE FROM refresh_tokens 
 	WHERE token = $1
 	`
-	_, err := db.Exec(query, token)
+	_, err := r.db.Exec(query, token)
 	if err != nil {
 		return fmt.Errorf("delete token: %w", err)
 	}
 	return nil
 }
 
-func DeleteExpiredToken(db *sql.DB) error {
+func (r *PGTokenRepository) DeleteExpiredToken() error {
 	query := `
 	DELETE FROM refresh_tokens 
 	WHERE expires_at < CURRENT_TIMESTAMP`
-	_, err := db.Exec(query)
+	_, err := r.db.Exec(query)
 	if err != nil {
 		return fmt.Errorf("delete expired token: %w", err)
 	}

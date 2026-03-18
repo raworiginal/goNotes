@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -14,8 +13,8 @@ import (
 )
 
 type NotesHandler struct {
-	db  *sql.DB
-	cfg *config.Config
+	store *repo.Store
+	cfg   *config.Config
 }
 
 type NewNoteRequest struct {
@@ -32,8 +31,8 @@ type PatchNoteRequest struct {
 	Items *[]model.ChecklistItem `json:"items,omitempty"`
 }
 
-func NewNotesHandler(db *sql.DB, cfg *config.Config) *NotesHandler {
-	return &NotesHandler{db: db, cfg: cfg}
+func NewNotesHandler(store *repo.Store, cfg *config.Config) *NotesHandler {
+	return &NotesHandler{store, cfg}
 }
 
 func (h *NotesHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +41,7 @@ func (h *NotesHandler) List(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	notes, err := repo.FindAllNotesByUser(h.db, userID)
+	notes, err := h.store.Notes.ListNotes(userID)
 	if err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -70,7 +69,7 @@ func (h *NotesHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	req.UserID = userID
 
-	created, err := repo.CreateNote(h.db, req)
+	created, err := h.store.Notes.CreateNote(req)
 	if err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -94,7 +93,7 @@ func (h *NotesHandler) GetNoteByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := repo.FindNoteByID(h.db, noteID)
+	note, err := h.store.Notes.FindNoteByID(noteID)
 	if err != nil {
 		if err == repo.ErrNotFound {
 			jsonError(w, "note not found", http.StatusNotFound)
@@ -124,7 +123,7 @@ func (h *NotesHandler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	note, err := repo.FindNoteByID(h.db, noteID)
+	note, err := h.store.Notes.FindNoteByID(noteID)
 	if err != nil {
 		if err == repo.ErrNotFound {
 			jsonError(w, "note not found", http.StatusNotFound)
@@ -149,7 +148,7 @@ func (h *NotesHandler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ID = noteID
 
-	updatedNote, err := repo.UpdateNote(h.db, req)
+	updatedNote, err := h.store.Notes.UpdateNote(req)
 	if err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -171,7 +170,7 @@ func (h *NotesHandler) PatchNote(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	note, err := repo.FindNoteByID(h.db, noteID)
+	note, err := h.store.Notes.FindNoteByID(noteID)
 	if err != nil {
 		if err == repo.ErrNotFound {
 			jsonError(w, "note not found", http.StatusNotFound)
@@ -203,7 +202,7 @@ func (h *NotesHandler) PatchNote(w http.ResponseWriter, r *http.Request) {
 		note.Items = *req.Items
 	}
 
-	updatedNote, err := repo.UpdateNote(h.db, note)
+	updatedNote, err := h.store.Notes.UpdateNote(note)
 	if err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -225,7 +224,7 @@ func (h *NotesHandler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	note, err := repo.FindNoteByID(h.db, noteID)
+	note, err := h.store.Notes.FindNoteByID(noteID)
 	if err != nil {
 		if err == repo.ErrNotFound {
 			jsonError(w, "note not found", http.StatusNotFound)
@@ -238,7 +237,7 @@ func (h *NotesHandler) DeleteNote(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if err := repo.DeleteNote(h.db, noteID); err != nil {
+	if err := h.store.Notes.DeleteNote(noteID); err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}

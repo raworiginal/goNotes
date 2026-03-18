@@ -12,7 +12,7 @@ import (
 )
 
 type AuthHandler struct {
-	store repo.Store
+	store *repo.Store
 	cfg   *config.Config
 }
 
@@ -39,7 +39,7 @@ type AccessToken struct {
 	AccessToken string `json:"access_token"`
 }
 
-func NewAuthHandler(store repo.Store, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(store *repo.Store, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
 		store: store,
 		cfg:   cfg,
