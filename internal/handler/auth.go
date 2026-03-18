@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -13,8 +12,8 @@ import (
 )
 
 type AuthHandler struct {
-	db  *sql.DB
-	cfg *config.Config
+	store repo.Store
+	cfg   *config.Config
 }
 
 type LoginRequest struct {
@@ -40,10 +39,10 @@ type AccessToken struct {
 	AccessToken string `json:"access_token"`
 }
 
-func NewAuthHandler(db *sql.DB, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(store repo.Store, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
-		db:  db,
-		cfg: cfg,
+		store: store,
+		cfg:   cfg,
 	}
 }
 
@@ -66,7 +65,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := repo.CreateUser(h.db, req.Username, string(hashedPassword))
+	user, err := h.store.Users.CreateUser(req.Username, string(hashedPassword))
 	if err != nil {
 		jsonError(w, "username taken", http.StatusConflict)
 		return
@@ -90,7 +89,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := repo.FindByUsername(h.db, req.Username)
+	user, err := h.store.Users.FindUserByUsername(req.Username)
 	if err != nil {
 		jsonError(w, "invalid credentials", http.StatusUnauthorized)
 		return
@@ -115,7 +114,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	refreshExpiry := time.Now().Add(h.cfg.RefreshTokenTTL)
-	if err := repo.CreateToken(h.db, user.ID, res.RefreshToken, refreshExpiry); err != nil {
+	if err := h.store.Tokens.CreateToken(user.ID, res.RefreshToken, refreshExpiry); err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -132,7 +131,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := repo.FindUserIDByToken(h.db, req.RefreshToken)
+	userID, err := h.store.Tokens.FindUserIDByToken(req.RefreshToken)
 	if err != nil {
 		if err == repo.ErrNotFound {
 			jsonError(w, "invalid or expired token", http.StatusUnauthorized)
@@ -161,7 +160,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := repo.DeleteToken(h.db, req.RefreshToken); err != nil {
+	if err := h.store.Tokens.DeleteToken(req.RefreshToken); err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
