@@ -7,7 +7,15 @@ import (
 	"github.com/raworiginal/goNotes/internal/model"
 )
 
-func CreateUser(db *sql.DB, username, hashedPassword string) (*model.User, error) {
+type PGUserRepository struct {
+	db *sql.DB
+}
+
+func NewUserRepository(db *sql.DB) *PGUserRepository {
+	return &PGUserRepository{db: db}
+}
+
+func (r *PGUserRepository) CreateUser(db *sql.DB, username, hashedPassword string) (*model.User, error) {
 	var user model.User
 
 	tx, err := db.Begin()
@@ -33,7 +41,7 @@ func CreateUser(db *sql.DB, username, hashedPassword string) (*model.User, error
 	return &user, nil
 }
 
-func FindByUsername(db *sql.DB, username string) (*model.User, error) {
+func (r *PGUserRepository) FindUserByUsername(db *sql.DB, username string) (*model.User, error) {
 	var user model.User
 
 	query := `
@@ -52,7 +60,7 @@ func FindByUsername(db *sql.DB, username string) (*model.User, error) {
 	return &user, nil
 }
 
-func ListUsers(db *sql.DB) ([]*model.User, error) {
+func (r *PGUserRepository) ListUsers(db *sql.DB) ([]*model.User, error) {
 	var users []*model.User
 	query := `
 	SELECT id, username, password, role, created_at, updated_at
@@ -78,7 +86,7 @@ func ListUsers(db *sql.DB) ([]*model.User, error) {
 	return users, nil
 }
 
-func UpdateUser(db *sql.DB, user *model.User) error {
+func (r *PGUserRepository) UpdateUser(db *sql.DB, user *model.User) error {
 	query := `
 	UPDATE users
 	SET username = $1, password = $2, role = $3, updated_at = CURRENT_TIMESTAMP
@@ -98,7 +106,7 @@ func UpdateUser(db *sql.DB, user *model.User) error {
 	return nil
 }
 
-func DeleteUser(db *sql.DB, userID int) error {
+func (r *PGUserRepository) DeleteUser(db *sql.DB, userID int) error {
 	query := `
 	DELETE FROM users
 	WHERE id = $1
