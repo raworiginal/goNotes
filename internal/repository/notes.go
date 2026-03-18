@@ -7,9 +7,16 @@ import (
 	"github.com/raworiginal/goNotes/internal/model"
 )
 
+type PGNoteRepository struct {
+	db *sql.DB
+}
 
-func CreateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
-	tx, err := db.Begin()
+func NewNoteRepository(db *sql.DB) *PGNoteRepository {
+	return &PGNoteRepository{db: db}
+}
+
+func (r *PGNoteRepository) CreateNote(note *model.Note) (*model.Note, error) {
+	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("create note: %w", err)
 	}
@@ -47,7 +54,7 @@ func CreateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 	return note, nil
 }
 
-func FindNoteByID(db *sql.DB, noteID int) (*model.Note, error) {
+func (r *PGNoteRepository) FindNoteByID(noteID int) (*model.Note, error) {
 	var note model.Note
 
 	query := `
@@ -55,7 +62,7 @@ func FindNoteByID(db *sql.DB, noteID int) (*model.Note, error) {
 	FROM notes 
 	WHERE id = $1
 	`
-	err := db.QueryRow(query, noteID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
+	err := r.db.QueryRow(query, noteID).Scan(&note.ID, &note.UserID, &note.Title, &note.Type, &note.Body, &note.CreatedAt, &note.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
@@ -64,7 +71,7 @@ func FindNoteByID(db *sql.DB, noteID int) (*model.Note, error) {
 	}
 
 	if note.Type == "checklist" {
-		note.Items, err = getCheckListItems(db, noteID)
+		note.Items, err = r.getCheckListItems(noteID)
 		if err != nil {
 			return nil, err
 		}
@@ -72,12 +79,12 @@ func FindNoteByID(db *sql.DB, noteID int) (*model.Note, error) {
 	return &note, nil
 }
 
-func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
+func (r *PGNoteRepository) ListNotes(userID int) ([]*model.Note, error) {
 	var notes []*model.Note
 	query := `
 	SELECT id, user_id, title, type, body, created_at, updated_at FROM notes Where user_id = $1 ORDER BY created_at DESC
 	`
-	rows, err := db.Query(query, userID)
+	rows, err := r.db.Query(query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("find all notes: %w", err)
 	}
@@ -90,7 +97,7 @@ func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
 			return nil, fmt.Errorf("scan note: %w", err)
 		}
 		if note.Type == "checklist" {
-			note.Items, err = getCheckListItems(db, note.ID)
+			note.Items, err = r.getCheckListItems(note.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -104,8 +111,8 @@ func FindAllNotesByUser(db *sql.DB, userID int) ([]*model.Note, error) {
 	return notes, nil
 }
 
-func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
-	tx, err := db.Begin()
+func (r *PGNoteRepository) UpdateNote(note *model.Note) (*model.Note, error) {
+	tx, err := r.db.Begin()
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +156,7 @@ func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
-	note, err = FindNoteByID(db, note.ID)
+	note, err = r.FindNoteByID(note.ID)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
@@ -157,11 +164,11 @@ func UpdateNote(db *sql.DB, note *model.Note) (*model.Note, error) {
 	return note, nil
 }
 
-func DeleteNote(db *sql.DB, noteID int) error {
+func (r *PGNoteRepository) DeleteNote(noteID int) error {
 	query := `
 DELETE FROM notes WHERE id = $1
 	`
-	result, err := db.Exec(query, noteID)
+	result, err := r.db.Exec(query, noteID)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
 	}
@@ -175,7 +182,7 @@ DELETE FROM notes WHERE id = $1
 	return nil
 }
 
-func getCheckListItems(db *sql.DB, noteID int) ([]model.ChecklistItem, error) {
+func (r *PGNoteRepository) getCheckListItems(noteID int) ([]model.ChecklistItem, error) {
 	var items []model.ChecklistItem
 	checklistQuery := `
 		SELECT id, position, text, completed
@@ -183,7 +190,7 @@ func getCheckListItems(db *sql.DB, noteID int) ([]model.ChecklistItem, error) {
 		WHERE note_id = $1
 		ORDER BY position
 		`
-	rows, err := db.Query(checklistQuery, noteID)
+	rows, err := r.db.Query(checklistQuery, noteID)
 	if err != nil {
 		return nil, err
 	}
